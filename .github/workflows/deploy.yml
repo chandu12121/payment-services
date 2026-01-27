@@ -1,0 +1,40 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-js: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    # We skip tests if not defined, but build check is good
+    - name: Build Check
+      run: |
+        # If there's a build step, uncomment this
+        # npm run build --if-present
+
+    # This step triggers the Render deployment
+    # It requires a RENDER_DEPLOY_HOOK_URL secret in GitHub Settings
+    - name: Trigger Render Deploy
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+        else
+          echo "RENDER_DEPLOY_HOOK_URL secret not set. Skipping deploy trigger."
+        fi
