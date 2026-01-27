@@ -5,21 +5,37 @@ const morgan = require("morgan");
 require('dotenv').config();
 
 const paymentRoutes = require("./routes/payment");
+const userRoutes = require("./routes/user"); // Import user routes
 const connectDB = require("./config/db");
 
 // Connect to Database
-connectDB();
+// Database connection handled before server startup
+
+// Start Cron Jobs
+const startPaymentCleanupJob = require("./cron/paymentCleanup");
+startPaymentCleanupJob();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// Enforce strict env usage for PORT
+if (!process.env.PORT) {
+  console.error('FATAL ERROR: PORT is not defined in .env');
+  process.exit(1);
+}
+const PORT = process.env.PORT;
 
 // Security middleware
 app.use(helmet());
 
 // CORS configuration
+if (!process.env.ALLOWED_ORIGINS) {
+  console.error('FATAL ERROR: ALLOWED_ORIGINS is not defined in .env');
+  process.exit(1);
+}
+
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-  methods: ['GET', 'POST'],
+  origin: process.env.ALLOWED_ORIGINS.split(','),
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Added commonly used methods
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
@@ -36,8 +52,11 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 // Request Logging
 app.use(requestLogger);
 
-// Payment routes
+// Mount routes
 app.use("/api/payments", paymentRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/bookings", require("./routes/bookings"));
+app.use("/api/invoices", require("./routes/invoices"));
 
 // Root route
 app.get("/", (req, res) => {
@@ -51,6 +70,9 @@ app.get("/", (req, res) => {
     }
   });
 });
+
+// Serve uploaded files statically
+app.use('/uploads', express.static('uploads'));
 
 // FIXED: Global 404 handler - using regex instead of "*"
 app.use(/.*/, (req, res) => {
@@ -74,9 +96,12 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`Payment API server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+// Connect to Database and start server
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Payment API server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
 });
 
 module.exports = app; // Export for testing if needed

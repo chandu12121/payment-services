@@ -13,18 +13,26 @@
   "description": "",
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "express-rate-limit": "^8.2.1",
     "helmet": "^8.1.0",
+    "ioredis": "^5.9.2",
+    "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.4",
     "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.5",
     "path-to-regexp": "^6.2.0",
+    "pdfkit": "^0.17.2",
+    "rate-limit-redis": "^4.3.1",
     "razorpay": "^2.9.6",
+    "validator": "^13.15.26",
     "winston": "^3.19.0"
   }
 }

@@ -4,9 +4,15 @@ const router = express.Router();
 // Import middlewares
 const { createPaymentLimiter, verifyPaymentLimiter } = require("../middlewares/rateLimit");
 const { validatePaymentRequest, validateVerificationRequest } = require("../middlewares/validation");
+const { authenticate } = require("../middlewares/auth");
 
 // Import controllers
-const { createPayment, verifyPayment } = require("../controllers/payments");
+const {
+  createPayment,
+  verifyPayment,
+  getUserTransactions,
+  refundPayment
+} = require("../controllers/payments");
 
 // Import config for health check
 const { isPaymentEnabled, NODE_ENV } = require("../config/razorpay");
@@ -32,9 +38,15 @@ router.post(
 
 router.post(
   "/verify-payment",
+  authenticate,
   verifyPaymentLimiter,
   validateVerificationRequest,
   verifyPayment
 );
+
+// Protected Routes
+router.get("/history", authenticate, getUserTransactions);
+router.post("/refund", authenticate, refundPayment);
+router.use("/invoices", require("./invoices"));
 
 module.exports = router;
