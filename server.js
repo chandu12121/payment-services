@@ -34,9 +34,22 @@ if (!process.env.ALLOWED_ORIGINS) {
 }
 
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS.split(','),
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Added commonly used methods
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: (origin, callback) => {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS.split(',');
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    // Check if origin is allowed or if it's a Vercel preview URL
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
+  credentials: true
 }));
 
 // Logging middleware
