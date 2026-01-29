@@ -1,3 +1,0 @@
-[dotenv@17.2.0] injecting env (9) from .env (tip: ⚙️  enable debug logging with { debug: true })
-Connected to DB
-No txn or booking found to link to. Creating dummy ones...

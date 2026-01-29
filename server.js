@@ -53,6 +53,8 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(requestLogger);
 
 // Mount routes
+// Health check endpoint (should be first for monitoring)
+app.use("/api/health", require("./routes/health"));
 app.use("/api/payments", paymentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/bookings", require("./routes/bookings"));
@@ -63,10 +65,13 @@ app.get("/", (req, res) => {
   res.json({
     message: "Payment API Service",
     version: "1.0.0",
+    status: "operational",
     endpoints: {
+      health: "GET /api/health - Comprehensive health check",
+      ping: "GET /api/health/ping - Quick ping check",
       createOrder: "POST /api/payments/create-order",
       verifyPayment: "POST /api/payments/verify-payment",
-      health: "GET /api/payments/health"
+      paymentHealth: "GET /api/payments/health"
     }
   });
 });
@@ -97,11 +102,27 @@ app.use((err, req, res, next) => {
 
 // Start server
 // Connect to Database and start server
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Payment API server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  });
-});
+// Start server
+const startServer = async () => {
+  try {
+    // Attempt to connect to database (non-blocking for server start in this context, 
+    // but we want to log the status)
+    connectDB().catch(err => {
+      console.error('Database connection failed during startup:', err.message);
+      // We do NOT exit here, so the health endpoint remains accessible
+    });
+
+    app.listen(PORT, () => {
+      console.log(`Payment API server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Health check available at: http://localhost:${PORT}/api/health`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app; // Export for testing if needed
