@@ -6,7 +6,7 @@ const email = Joi.string().email().lowercase().trim().required();
 const password = Joi.string().min(8).max(128).required();
 const phone = Joi.string().pattern(/^\+?[1-9]\d{1,14}$/); // E.164 format
 const name = Joi.string().min(2).max(100).trim().required();
-const dateOfBirth = Joi.date().max('now').required();
+// const dateOfBirth = Joi.date().max('now').required();
 
 // Address validation
 const addressSchema = Joi.object({
