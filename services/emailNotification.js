@@ -5,14 +5,14 @@ const transporter = nodemailer.createTransport({
     port: 587,
     secure: false, // true for port 465
     auth: {
-        user: process.env.EMAIL_USER || "chandup12121@gmail.com",
-        pass: process.env.EMAIL_PASS || "dnhg isec kwru bbqj"
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
 });
 
 const sendInvoice = async ({ to, name, invoiceNumber, amount, currency, items = [], pdfUrl }) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER || "chandup12121@gmail.com",
+        from: process.env.EMAIL_USER,
         to: to,
         subject: `Invoice ${invoiceNumber} from Payment Service`,
         html: `
@@ -57,7 +57,7 @@ const sendInvoice = async ({ to, name, invoiceNumber, amount, currency, items = 
 
 const sendPasswordResetEmail = async ({ email, resetUrl, name }) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER || "chandup12121@gmail.com",
+        from: process.env.EMAIL_USER,
         to: email,
         subject: "Password Reset Request",
         html: `
@@ -79,7 +79,7 @@ const sendPasswordResetEmail = async ({ email, resetUrl, name }) => {
 
 const sendVerificationEmail = async ({ email, name, verificationUrl }) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER || "chandup12121@gmail.com",
+        from: process.env.EMAIL_USER,
         to: email,
         subject: "Email Verification",
         html: `
@@ -100,7 +100,7 @@ const sendVerificationEmail = async ({ email, name, verificationUrl }) => {
 
 const sendWelcomeEmail = async ({ email, name }) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER || "chandup12121@gmail.com",
+        from: process.env.EMAIL_USER,
         to: email,
         subject: "Welcome to Payment Service",
         html: `
@@ -118,7 +118,7 @@ const sendWelcomeEmail = async ({ email, name }) => {
 
 const sendAccountStatusChangeEmail = async ({ email, name, status, reason }) => {
     const mailOptions = {
-        from: process.env.EMAIL_USER || "chandup12121@gmail.com",
+        from: process.env.EMAIL_USER,
         to: email,
         subject: "Account Status Update",
         html: `

@@ -77,9 +77,9 @@ const downloadInvoice = async (req, res) => {
             .fontSize(20)
             .text('PAYMENT INVOICE', 50, 57)
             .fontSize(10)
-            .text('PayFlow Pro', 200, 50, { align: 'right' })
-            .text('123 Tech Park', 200, 65, { align: 'right' })
-            .text('Bangalore, India', 200, 80, { align: 'right' })
+            .text(process.env.COMPANY_NAME || 'PayFlow Pro', 200, 50, { align: 'right' })
+            .text(process.env.COMPANY_ADDRESS || '123 Tech Park', 200, 65, { align: 'right' })
+            .text(process.env.COMPANY_CITY || 'Bangalore, India', 200, 80, { align: 'right' })
             .moveDown();
 
         // --- Divider ---

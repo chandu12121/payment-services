@@ -11,7 +11,8 @@ const {
   createPayment,
   verifyPayment,
   getUserTransactions,
-  refundPayment
+  refundPayment,
+  getPaymentStats
 } = require("../controllers/payments");
 
 // Import config for health check
@@ -46,6 +47,7 @@ router.post(
 
 // Protected Routes
 router.get("/history", authenticate, getUserTransactions);
+router.get("/stats", authenticate, getPaymentStats);
 router.post("/refund", authenticate, refundPayment);
 router.use("/invoices", require("./invoices"));
 

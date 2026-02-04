@@ -41,8 +41,7 @@ const userSchema = new mongoose.Schema({
         validate: {
             validator: validator.isEmail,
             message: "Please provide a valid email address"
-        },
-        index: true
+        }
     },
 
     // Optional alternative email
@@ -288,9 +287,7 @@ const userSchema = new mongoose.Schema({
 
     // Referral System
     referralCode: {
-        type: String,
-        unique: true,
-        sparse: true
+        type: String
     },
     referredBy: {
         type: mongoose.Schema.Types.ObjectId,

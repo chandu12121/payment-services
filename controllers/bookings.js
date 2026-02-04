@@ -1,4 +1,6 @@
 const Booking = require("../models/Bookings");
+const Transaction = require("../models/Transactions"); // Required for population
+const Invoice = require("../models/Invoice"); // Required for population
 const logger = require("../utils/logger");
 
 // Get all bookings for the current user
@@ -11,8 +13,12 @@ const getUserBookings = async (req, res) => {
 
         return res.status(200).json({ success: true, data: bookings });
     } catch (error) {
-        logger.error(`Get Bookings Error: ${error.message}`);
-        return res.status(500).json({ success: false, error: "Failed to fetch bookings" });
+        logger.error(`Get Bookings Error: ${error.stack}`);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to fetch bookings",
+            details: error.message
+        });
     }
 };
 

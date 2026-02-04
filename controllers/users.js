@@ -166,7 +166,7 @@ const registerUser = async (req, res) => {
         const verificationToken = user.createEmailVerificationToken();
         await user.save();
 
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+        const clientUrl = process.env.CLIENT_URL;
         await sendVerificationEmail({
             email: user.email,
             name: user.name,
@@ -679,7 +679,7 @@ const forgotPassword = async (req, res) => {
         await user.save();
 
         // Send reset email
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+        const clientUrl = process.env.CLIENT_URL;
         const resetUrl = `${clientUrl}/reset-password/${resetToken}`;
 
         await sendPasswordResetEmail({
@@ -873,7 +873,7 @@ const resendVerificationEmail = async (req, res) => {
         await user.save();
 
         // Send verification email
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+        const clientUrl = process.env.CLIENT_URL;
         await sendVerificationEmail({
             email: user.email,
             name: user.name,

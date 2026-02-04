@@ -96,7 +96,6 @@ const bookingSchema = new mongoose.Schema({
     // Booking details
     bookingType: {
         type: String,
-        enum: ["hotel", "flight", "event", "tour", "service", "product", "subscription", "general", "payment"],
         required: true
     },
     bookingDate: {

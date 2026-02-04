@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const { razorpayClient, isPaymentEnabled, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require("../config/razorpay");
 const PDFDocument = require('pdfkit');
 const { verifySignature } = require("../utils/signatureVerification");
@@ -80,26 +81,42 @@ const verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid signature" });
     }
 
-    // Check availability
-    const existingBooking = await Booking.findOne({ razorpayOrderId: razorpay_order_id });
+    // Check if this order has already been processed (Idempotency)
+    const existingBooking = await Booking.findOne({ razorpayOrderId: razorpay_order_id }).populate('invoiceId');
     if (existingBooking) {
-      return res.status(200).json({ success: true, message: "Payment already processed", bookingId: existingBooking.Id });
+      logger.info(`Payment already processed for Order: ${razorpay_order_id}`);
+      return res.status(200).json({
+        success: true,
+        message: "Payment already processed",
+        bookingId: existingBooking.Id,
+        invoiceNumber: existingBooking.invoiceId?.invoiceNumber
+      });
     }
 
     // 2. Fetch detailed payment info from Razorpay
     let fullPaymentDetails = {};
     try {
-      fullPaymentDetails = await razorpayClient.payments.fetch(razorpay_payment_id);
+      logger.info(`Fetching Razorpay details for payment: ${razorpay_payment_id}`);
+      // Set a local timeout for the fetch to prevent hanging
+      const fetchPromise = razorpayClient.payments.fetch(razorpay_payment_id);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Razorpay fetch timeout')), 5000)
+      );
+      fullPaymentDetails = await Promise.race([fetchPromise, timeoutPromise]);
+      logger.debug(`Razorpay details fetched successfully`);
     } catch (err) {
-      logger.warn(`Failed to fetch Razorpay details: ${err.message}`);
+      logger.warn(`Failed to fetch Razorpay details: ${err.message}. Proceeding with provided data.`);
     }
 
-    // 3. Create Transaction Record with RICH details
+    // 3. Create Transaction Record
     const transactionId = generateCustomId("TR");
     let transaction;
     try {
+      const derivedUserId = userId || req.user.userId;
+      logger.info(`Creating transaction record for user: ${derivedUserId}`);
+
       transaction = await Transactions.create({
-        userId: req.user.userId,
+        userId: derivedUserId,
         amount: Number(paymentDetails?.amount),
         currency: paymentDetails?.currency || "INR",
         paymentType: (paymentDetails?.paymentType || "general").toLowerCase(),
@@ -118,11 +135,11 @@ const verifyPayment = async (req, res) => {
         businessDetails: {
           gstNumber: paymentDetails?.gstNumber,
         },
-        fee: fullPaymentDetails.fee,
-        tax: fullPaymentDetails.tax,
+        fee: fullPaymentDetails.fee || 0,
+        tax: fullPaymentDetails.tax || 0,
         errorDescription: fullPaymentDetails.error_description
       });
-      logger.info(`Transaction Created: ${transaction.Id}`);
+      logger.info(`Transaction Created Successfully: ${transaction.Id}`);
     } catch (txnError) {
       logger.error(`Transaction Creation Failed: ${txnError.message}`, { error: txnError });
       throw txnError;
@@ -132,9 +149,12 @@ const verifyPayment = async (req, res) => {
     const customPaymentId = generateCustomId("PA");
     let booking;
     try {
+      const derivedUserId = userId || req.user.userId;
+      logger.info(`Creating booking record: ${customPaymentId}`);
+
       booking = await Booking.create({
         transactionId: transaction._id,
-        userId: req.user.userId,
+        userId: derivedUserId,
         amount: Number(paymentDetails?.amount),
         currency: paymentDetails?.currency || "INR",
         razorpayOrderId: razorpay_order_id,
@@ -160,7 +180,7 @@ const verifyPayment = async (req, res) => {
           totalPrice: Number(paymentDetails?.amount)
         }]
       });
-      logger.info(`Booking Created: ${booking.Id}`);
+      logger.info(`Booking Created Successfully: ${booking.Id}`);
     } catch (bookingError) {
       logger.error(`Booking Creation Failed: ${bookingError.message}`, { error: bookingError });
       throw bookingError;
@@ -170,9 +190,12 @@ const verifyPayment = async (req, res) => {
     const invoiceNumber = generateCustomId("IN");
     let invoice;
     try {
+      const derivedUserId = userId || req.user.userId;
       const finalAmount = Number(paymentDetails?.amount);
+      logger.info(`Generating invoice: ${invoiceNumber}`);
+
       const invoiceData = {
-        userId: req.user.userId,
+        userId: derivedUserId,
         transactionId: transaction._id,
         bookingId: booking._id,
         invoiceNumber,
@@ -192,7 +215,7 @@ const verifyPayment = async (req, res) => {
         status: "paid",
         paymentStatus: "paid",
         items: [{
-          description: transaction.paymentType || "Service Payment",
+          description: (paymentDetails?.paymentType || "Service Payment").toUpperCase(),
           amount: finalAmount,
           quantity: 1,
           unitPrice: finalAmount,
@@ -203,30 +226,29 @@ const verifyPayment = async (req, res) => {
 
       invoice = await Invoice.create(invoiceData);
 
-      // Link invoice to booking (optional reference update)
-      booking.invoiceId = invoice._id;
-      await booking.save();
-      logger.info(`Invoice Generated: ${invoice.invoiceNumber}`);
+      // Link invoice to booking
+      await Booking.findByIdAndUpdate(booking._id, { invoiceId: invoice._id });
+      logger.info(`Invoice Generated and Linked: ${invoice.invoiceNumber}`);
     } catch (invError) {
       logger.error(`Invoice Generation Failed: ${invError.message}`, { error: invError });
     }
 
-    // 6. Send Email
-    try {
-      if (personalDetails?.email && invoice) {
-        await sendInvoice({
-          to: personalDetails.email,
-          name: personalDetails.name,
-          invoiceNumber: invoice.invoiceNumber,
-          amount: invoice.amount,
-          currency: booking.currency,
-          items: invoice.items
-        });
-      }
-    } catch (emailError) {
-      logger.error(`Email sending failed: ${emailError.message}`);
+    // 6. Send Email (non-blocking)
+    if (personalDetails?.email && invoice) {
+      logger.info(`Dispatching invoice email to: ${personalDetails.email}`);
+      sendInvoice({
+        to: personalDetails.email,
+        name: personalDetails.name,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: invoice.amount,
+        currency: booking.currency,
+        items: invoice.items
+      }).catch(emailError => {
+        logger.error(`Email sending background failure: ${emailError.message}`);
+      });
     }
 
+    logger.info(`VerifyPayment completed successfully for user: ${userId || req.user.userId}`);
     return res.json({
       success: true,
       message: "Payment processed successfully",
@@ -236,8 +258,12 @@ const verifyPayment = async (req, res) => {
     });
 
   } catch (error) {
-    logger.error(`Verify Payment/Save Error: ${error.message}`, { stack: error.stack });
-    return res.status(500).json({ success: false, error: "Payment processing failed" });
+    logger.error(`Verify Payment CRITICAL ERROR: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({
+      success: false,
+      error: "Payment processing failed. Details saved where possible.",
+      details: error.message
+    });
   }
 };
 
@@ -424,9 +450,181 @@ const refundPayment = async (req, res) => {
   }
 };
 
+const getPaymentStats = async (req, res) => {
+  try {
+    const { timeRange = 'month' } = req.query;
+    const userId = req.user.userId;
+
+    // Set time boundary
+    const now = new Date();
+    let startDate = new Date();
+    if (timeRange === 'week') startDate.setDate(now.getDate() - 7);
+    else if (timeRange === 'month') startDate.setMonth(now.getMonth() - 1);
+    else if (timeRange === 'year') startDate.setFullYear(now.getFullYear() - 1);
+    else startDate.setMonth(now.getMonth() - 1); // Default to month
+
+    const previousStartDate = new Date(startDate);
+    if (timeRange === 'week') previousStartDate.setDate(startDate.getDate() - 7);
+    else if (timeRange === 'month') previousStartDate.setMonth(startDate.getMonth() - 1);
+    else if (timeRange === 'year') previousStartDate.setFullYear(startDate.getFullYear() - 1);
+
+    // 1. Total Volume (Successful Transactions)
+    const currentTransactions = await Transactions.find({
+      userId,
+      status: { $in: ['success', 'refunded'] },
+      createdAt: { $gte: startDate }
+    });
+
+    const previousTransactions = await Transactions.find({
+      userId,
+      status: { $in: ['success', 'refunded'] },
+      createdAt: { $gte: previousStartDate, $lt: startDate }
+    });
+
+    const totalVolume = currentTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+    const prevVolume = previousTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+    const volumeChange = prevVolume === 0 ? 100 : ((totalVolume - prevVolume) / prevVolume) * 100;
+
+    // 2. Total Revenue (Paid Invoices)
+    const currentInvoices = await Invoice.find({
+      userId,
+      status: 'paid',
+      createdAt: { $gte: startDate }
+    });
+
+    const prevInvoices = await Invoice.find({
+      userId,
+      status: 'paid',
+      createdAt: { $gte: previousStartDate, $lt: startDate }
+    });
+
+    const totalRevenue = currentInvoices.reduce((acc, i) => acc + Number(i.totalAmount || 0), 0);
+    const prevRevenue = prevInvoices.reduce((acc, i) => acc + Number(i.totalAmount || 0), 0);
+    const revenueChange = prevRevenue === 0 ? 100 : ((totalRevenue - prevRevenue) / prevRevenue) * 100;
+
+    // 3. Pending Payments
+    // 3. Pending Payments
+    const totalPendingAmount = await Invoice.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(userId), status: 'sent' } },
+      { $group: { _id: null, total: { $sum: "$totalAmount" } } }
+    ]);
+
+    // Calculate Trend for Pending (New Pending vs Old Pending creation)
+    const currentPending = await Invoice.find({
+      userId,
+      status: 'sent',
+      createdAt: { $gte: startDate }
+    });
+    const prevPending = await Invoice.find({
+      userId,
+      status: 'sent',
+      createdAt: { $gte: previousStartDate, $lt: startDate }
+    });
+
+    const currentPendingSum = currentPending.reduce((acc, i) => acc + Number(i.totalAmount || 0), 0);
+    const prevPendingSum = prevPending.reduce((acc, i) => acc + Number(i.totalAmount || 0), 0);
+    const pendingChange = prevPendingSum === 0 ? (currentPendingSum > 0 ? 100 : 0) : ((currentPendingSum - prevPendingSum) / prevPendingSum) * 100;
+
+    // 4. Monthly Flow (Last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(now.getMonth() - 5);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+
+    const monthlyDataRaw = await Transactions.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(userId),
+          status: { $in: ['success', 'refunded'] },
+          createdAt: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: "$createdAt" },
+          income: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    // Convert aggregation results (paise) to rupees
+    const monthlyData = monthlyDataRaw.map(item => ({
+      ...item,
+      income: item.income / 100
+    }));
+
+    // 5. Category Breakdown
+    const categoryDataRaw = await Transactions.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(userId),
+          status: { $in: ['success', 'refunded'] }
+        }
+      },
+      {
+        $group: {
+          _id: "$paymentType",
+          amount: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Convert aggregation results (paise) to rupees
+    const categoryData = categoryDataRaw.map(item => ({
+      ...item,
+      amount: item.amount / 100
+    }));
+
+    // 6. Total Refunded
+    const refundedTransactions = await Transactions.find({
+      userId,
+      status: 'refunded',
+      createdAt: { $gte: startDate }
+    });
+
+    const prevRefundedTransactions = await Transactions.find({
+      userId,
+      status: 'refunded',
+      createdAt: { $gte: previousStartDate, $lt: startDate }
+    });
+
+    const totalRefunded = refundedTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+    const prevRefunded = prevRefundedTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+    const refundChange = prevRefunded === 0 ? (totalRefunded > 0 ? 100 : 0) : ((totalRefunded - prevRefunded) / prevRefunded) * 100;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalVolume,
+        volumeChange: volumeChange.toFixed(1),
+        totalRevenue,
+        revenueChange: revenueChange.toFixed(1),
+        pendingPayments: (totalPendingAmount[0]?.total || 0) / 100, // Convert aggregation results (paise) to rupees
+        pendingChange: pendingChange.toFixed(1),
+        totalRefunded, // New metric
+        refundChange: refundChange.toFixed(1),
+        totalTransactions: currentTransactions.length,
+        transactionChange: currentTransactions.length - previousTransactions.length,
+        monthlyFlow: monthlyData,
+        categories: categoryData
+      }
+    });
+
+  } catch (error) {
+    logger.error(`Get Stats Error: ${error.stack}`);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch stats",
+      details: error.message
+    });
+  }
+};
+
 module.exports = {
   createPayment,
   verifyPayment,
   getUserTransactions,
-  refundPayment
+  refundPayment,
+  getPaymentStats
 };
