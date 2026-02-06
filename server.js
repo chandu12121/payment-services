@@ -27,7 +27,8 @@ const PORT = process.env.PORT;
 // Hardcoded Allowed Origins for reliability
 const allowedOrigins = [
   'https://paymentflowapp.vercel.app',
-  'https://payment-services-7y3u.onrender.com', // Self (for health checks etc)
+  'https://payment-app-rho-murex.vercel.app',
+  'https://payment-services-z80b.onrender.com',
   'http://localhost:5173',
   'http://localhost:7000'
 ];
@@ -39,7 +40,11 @@ const corsOptions = {
 
     const normalizedOrigin = origin.replace(/\/$/, '');
 
-    if (allowedOrigins.indexOf(normalizedOrigin) !== -1 || normalizedOrigin.endsWith('.vercel.app')) {
+    // Check against allowed list OR allow any localhost/vercel app for flexibility during dev
+    if (allowedOrigins.indexOf(normalizedOrigin) !== -1 ||
+      normalizedOrigin.endsWith('.vercel.app') ||
+      normalizedOrigin.includes('localhost') ||
+      normalizedOrigin.endsWith('.onrender.com')) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS. Origin:', origin, 'Normalized:', normalizedOrigin);
@@ -47,17 +52,17 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
-app.options(/(.*)/, cors(corsOptions)); // Enable pre-flight for all routes
+app.options(/(.*)/, cors(corsOptions));
 
 // Security middleware - Configure for Cross-Origin
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-
 // Logging middleware
 app.use(morgan('combined'));
 
