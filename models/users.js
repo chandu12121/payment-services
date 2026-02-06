@@ -372,7 +372,7 @@ const userSchema = new mongoose.Schema({
 });
 
 // ==================== INDEXES ====================
-userSchema.index({ email: 1 }, { unique: true });
+// userSchema.index({ email: 1 }, { unique: true }); // Removed duplicate index
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ "addresses.city": 1 });
 userSchema.index({ "addresses.country": 1 });
