@@ -24,32 +24,38 @@ if (!process.env.PORT) {
 }
 const PORT = process.env.PORT;
 
-// Security middleware
-app.use(helmet());
+// Hardcoded Allowed Origins for reliability
+const allowedOrigins = [
+  'https://paymentflowapp.vercel.app',
+  'https://payment-services-7y3u.onrender.com', // Self (for health checks etc)
+  'http://localhost:5173',
+  'http://localhost:7000'
+];
 
-// CORS configuration
-if (!process.env.ALLOWED_ORIGINS) {
-  console.error('FATAL ERROR: ALLOWED_ORIGINS is not defined in .env');
-  process.exit(1);
-}
-
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    // Check if origin is allowed or if it's a Vercel preview URL
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.vercel.app')) {
+    const normalizedOrigin = origin.replace(/\/$/, '');
+
+    if (allowedOrigins.indexOf(normalizedOrigin) !== -1 || normalizedOrigin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
-      console.log('Blocked by CORS:', origin);
+      console.log('Blocked by CORS. Origin:', origin, 'Normalized:', normalizedOrigin);
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   credentials: true
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Enable pre-flight for all routes
+
+// Security middleware - Configure for Cross-Origin
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
 // Logging middleware
