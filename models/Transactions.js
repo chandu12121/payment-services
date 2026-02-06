@@ -322,6 +322,8 @@ transactionSchema.statics.findFailedTransactions = function (days = 7) {
 
 // Virtual for formatted amount
 transactionSchema.virtual('formattedAmount').get(function () {
+    if (!this.currency || this.amount === undefined) return undefined;
+
     return new Intl.NumberFormat('en-IN', {
         style: 'currency',
         currency: this.currency
