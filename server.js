@@ -24,14 +24,31 @@ if (!process.env.PORT) {
 }
 const PORT = process.env.PORT;
 
-// Hardcoded Allowed Origins for reliability
-const allowedOrigins = [
+// Get CLIENT_URL from environment with fallback
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;
+
+// Build allowed origins from environment and defaults
+const allowedOriginsList = [
+  CLIENT_URL,
+  SERVER_URL,
   'https://paymentflowapp.vercel.app',
   'https://payment-app-rho-murex.vercel.app',
-  'https://payment-services-z80b.onrender.com',
-  'http://localhost:5173',
-  'http://localhost:7000'
+  'https://payment-services-z80b.onrender.com'
 ];
+
+// Add additional origins from ALLOWED_ORIGINS env if provided
+if (process.env.ALLOWED_ORIGINS) {
+  const envOrigins = process.env.ALLOWED_ORIGINS
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(origin => origin);
+  allowedOriginsList.push(...envOrigins);
+}
+
+const allowedOrigins = [...new Set(allowedOriginsList)]; // Remove duplicates
+
+console.log('Allowed CORS Origins:', allowedOrigins);
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -83,6 +100,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/bookings", require("./routes/bookings"));
 app.use("/api/invoices", require("./routes/invoices"));
+app.use("/api/notifications", require("./routes/notifications"));
+
 
 // Root route
 app.get("/", (req, res) => {
@@ -103,11 +122,12 @@ app.get("/", (req, res) => {
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
-// FIXED: Global 404 handler - using regex instead of "*"
-app.use(/.*/, (req, res) => {
+// Global 404 handler - placed after all specific routes
+app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: "Route not found"
+    error: "Route not found",
+    path: req.originalUrl
   });
 });
 
@@ -124,19 +144,23 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-// Connect to Database and start server
+const http = require("http");
+const { init: initSocket } = require("./config/socket");
+
+const server = http.createServer(app);
+
+// Initialize Socket.io
+initSocket(server);
+
 // Start server
 const startServer = async () => {
   try {
-    // Attempt to connect to database (non-blocking for server start in this context, 
-    // but we want to log the status)
+    // Attempt to connect to database
     connectDB().catch(err => {
       console.error('Database connection failed during startup:', err.message);
-      // We do NOT exit here, so the health endpoint remains accessible
     });
 
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`Payment API server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`Health check available at: http://localhost:${PORT}/api/health`);

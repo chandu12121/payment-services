@@ -34,14 +34,16 @@ const getInvoiceById = async (req, res) => {
     }
 };
 
-// Download Invoice PDF
+// Download Invoice PDF - Public endpoint for email links (no auth required)
 const downloadInvoice = async (req, res) => {
     let doc;
     try {
         const { id } = req.params;
-        const query = { userId: req.user.userId };
-
+        
+        // Build query - support both ObjectId and invoiceNumber
+        const query = {};
         const isObjectId = /^[0-9a-fA-F]{24}$/.test(id);
+        
         if (isObjectId) {
             query._id = id;
         } else {
@@ -144,6 +146,18 @@ const downloadInvoice = async (req, res) => {
         doc.text("Thank you for your business.", 50, 700, { align: "center", width: 500 });
 
         doc.end();
+
+        // Trigger in-app notification for download (only if user is authenticated)
+        const { createNotification } = require("../utils/notificationHelper");
+        if (req.user?.userId) {
+          createNotification(
+            req.user.userId,
+            'info',
+            'Invoice Downloaded',
+            `Invoice #${invoice.invoiceNumber} has been downloaded successfully.`,
+            { invoiceId: invoice.invoiceNumber, link: '/invoices' }
+          ).catch(e => logger.error(`Download notification failed: ${e.message}`));
+        }
 
     } catch (error) {
         logger.error(`Download Invoice Error: ${error.message}`);

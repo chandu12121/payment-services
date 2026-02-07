@@ -12,6 +12,13 @@ const {
 } = require("../services/emailNotification");
 const { uploadFile, deleteFile } = require("../services/fileUpload");
 const { generateOTP, verifyOTP } = require("../services/otpService");
+const {
+    notifyAccountUpdate,
+    notifyWelcome,
+    notifyPasswordResetRequest,
+    notifyPasswordResetSuccess,
+    notifyEmailVerified
+} = require("../utils/notificationHelper");
 
 // ==================== HELPER FUNCTIONS ====================
 const generateAuthResponse = (user, deviceInfo = {}) => {
@@ -178,6 +185,9 @@ const registerUser = async (req, res) => {
             email: user.email,
             name: user.name
         });
+
+        // Trigger in-app welcome notification
+        notifyWelcome(user._id, user.name).catch(e => console.error(`Welcome notification failed: ${e.message}`));
 
         // Generate auth response
         const authResponse = generateAuthResponse(user, {
@@ -479,6 +489,9 @@ const updateProfile = async (req, res) => {
             data: updatedUser
         });
 
+        // Trigger in-app notification
+        notifyAccountUpdate(userId, 'profile').catch(e => console.error(`Profile update notification failed: ${e.message}`));
+
     } catch (error) {
         console.error("Update profile error:", error);
         res.status(500).json({
@@ -635,6 +648,9 @@ const changePassword = async (req, res) => {
             message: "Password changed successfully"
         });
 
+        // Trigger in-app notification
+        notifyAccountUpdate(userId, 'password').catch(e => console.error(`Password change notification failed: ${e.message}`));
+
     } catch (error) {
         console.error("Change password error:", error);
         res.status(500).json({
@@ -688,6 +704,9 @@ const forgotPassword = async (req, res) => {
             resetUrl,
             type: 'reset_request'
         });
+
+        // Trigger in-app notification
+        notifyPasswordResetRequest(user._id).catch(e => console.error(`Reset request notification failed: ${e.message}`));
 
         res.status(200).json({
             success: true,
@@ -758,6 +777,9 @@ const resetPassword = async (req, res) => {
             type: 'password_reset'
         });
 
+        // Trigger in-app notification
+        notifyPasswordResetSuccess(user._id).catch(e => console.error(`Reset success notification failed: ${e.message}`));
+
         res.status(200).json({
             success: true,
             message: "Password reset successful. You can now login with your new password."
@@ -823,6 +845,9 @@ const verifyEmail = async (req, res) => {
         }
 
         await user.save();
+
+        // Trigger in-app notification
+        notifyEmailVerified(user._id).catch(e => console.error(`Email verification notification failed: ${e.message}`));
 
         res.status(200).json({
             success: true,
