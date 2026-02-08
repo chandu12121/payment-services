@@ -21,9 +21,9 @@ if (process.env.REDIS_URL) {
  * @param {Object} options - Rate limit options
  */
 const createRateLimiter = (options = {}) => {
-  const {
+const {
     windowMs = 15 * 60 * 1000, // 15 minutes
-    max = 100, // limit each IP to 100 requests per windowMs
+    max = 1000000, // limit each IP to 1000000 requests per windowMs
     message = "Too many requests from this IP, please try again later.",
     keyGenerator, // Allow overriding, but default to undefined (library default)
     skipSuccessfulRequests = false,
@@ -36,7 +36,7 @@ const createRateLimiter = (options = {}) => {
     ? new RedisStore({
       client: redisClient,
       prefix: "rate_limit:"
-    })
+    })  
     : undefined; // Use in-memory store if Redis not available
 
   const limiterOptions = {
