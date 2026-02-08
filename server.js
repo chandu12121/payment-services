@@ -133,6 +133,89 @@ app.get('/check-env-chandu123', (req, res) => {
   });
 });
 
+app.get('/test-exact-config', async (req, res) => {
+  const nodemailer = require('nodemailer');
+
+  console.log('Current config:', {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+    clientUrl: process.env.CLIENT_URL
+  });
+
+  // Use EXACT same config as your working code
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    tls: {
+      ciphers: 'SSLv3',
+      rejectUnauthorized: false
+    }
+  });
+
+  try {
+    await transporter.verify();
+    console.log('SMTP connection verified');
+
+    res.json({
+      success: true,
+      message: 'SMTP configuration works',
+      config: {
+        host: "smtp.gmail.com",
+        port: 587,
+        user: process.env.EMAIL_USER,
+        hasPassword: !!process.env.EMAIL_PASS,
+        clientUrl: process.env.CLIENT_URL
+      }
+    });
+
+  } catch (error) {
+    console.error('SMTP Error:', {
+      message: error.message,
+      code: error.code,
+      response: error.response,
+      responseCode: error.responseCode
+    });
+
+    // Try without password spaces
+    try {
+      console.log('Trying without password spaces...');
+      const passwordNoSpaces = process.env.EMAIL_PASS.replace(/\s+/g, '');
+
+      const transporter2 = nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: passwordNoSpaces
+        }
+      });
+
+      await transporter2.verify();
+
+      res.json({
+        success: true,
+        message: 'Works without spaces in password',
+        suggestion: 'Remove spaces from EMAIL_PASS in Render'
+      });
+
+    } catch (error2) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        response: error.response,
+        suggestion: 'Gmail is blocking Render. Use SendGrid or Mailgun instead.'
+      });
+    }
+  }
+});
+
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
