@@ -128,7 +128,7 @@ app.get('/check-env-chandu123', (req, res) => {
     ),
     mailkeys: {
       email: process.env.EMAIL_USER === "chandup12121@gmail.com" ? true : false,
-      password: process.env.EMAIL_PASS === "dnhg isec kwru bbqj" ? true : false,
+      password: process.env.EMAIL_PASS === "dnhgiseckwrubbqj" ? true : false,
     },
   });
 });
@@ -216,6 +216,61 @@ app.get('/test-exact-config', async (req, res) => {
   }
 });
 
+app.get('/test-exact-config-fixed', async (req, res) => {
+  const nodemailer = require('nodemailer');
+
+  console.log('Testing with timeout...');
+
+  // Set a timeout promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Email test timeout (10s)')), 10000);
+  });
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      },
+      connectionTimeout: 5000, // 5 seconds
+      greetingTimeout: 5000,
+      socketTimeout: 5000
+    });
+
+    // Race between email test and timeout
+    await Promise.race([
+      transporter.verify(),
+      timeoutPromise
+    ]);
+
+    console.log('✓ SMTP verified');
+
+    res.json({
+      success: true,
+      message: 'Email works with timeout',
+      config: {
+        user: process.env.EMAIL_USER,
+        passwordLength: process.env.EMAIL_PASS?.length
+      }
+    });
+
+  } catch (error) {
+    console.error('✗ Email test failed:', error.message);
+
+    res.json({
+      success: false,
+      error: error.message,
+      suggestion: 'Gmail is blocking Render IP. Use SendGrid instead.',
+      currentPassword: process.env.EMAIL_PASS ?
+        `Length: ${process.env.EMAIL_PASS.length}, Has spaces: ${process.env.EMAIL_PASS.includes(' ')}` :
+        'NOT SET'
+    });
+  }
+});
+
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
@@ -263,6 +318,8 @@ const startServer = async () => {
       console.log(`Payment API server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`Health check available at: http://localhost:${PORT}/api/health`);
+      console.log(`Email test available at: http://localhost:${PORT}/test-exact-config-fixed`);
+      console.log(`Email test available at: http://localhost:${PORT}/test-exact-config`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

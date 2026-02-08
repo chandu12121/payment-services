@@ -6,15 +6,27 @@ const welcomeTemplate = require("../templates/welcomeTemplate");
 const accountStatusTemplate = require("../templates/accountStatusTemplate");
 const refundTemplate = require("../templates/refundTemplate");
 
+// const transporter = nodemailer.createTransport({
+//     host: "smtp.gmail.com",
+//     port: 587,
+//     secure: false, // true for port 465
+//     auth: {
+//         user: process.env.EMAIL_USER,
+//         pass: process.env.EMAIL_PASS
+//     }
+// });
+
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: "smtp.sendgrid.net",
     port: 587,
-    secure: false, // true for port 465
+    secure: false,
     auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+        user: "apikey",
+        pass: process.env.SENDER_API_KEY
     }
 });
+
+console.log(process.env.SENDER_API_KEY, transporter);
 
 const sendInvoice = async ({ to, name, invoiceNumber, amount, currency, items = [], pdfUrl, transactionDetails = {}, clientUrl }) => {
     const mailOptions = {
