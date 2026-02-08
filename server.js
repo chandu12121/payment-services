@@ -117,6 +117,22 @@ app.get("/", (req, res) => {
   });
 });
 
+// Add this route to check
+app.get('/check-env-chandu123', (req, res) => {
+  res.json({
+    EMAIL_USER: process.env.EMAIL_USER ? process.env.EMAIL_USER : 'NOT SET',
+    EMAIL_PASS: process.env.EMAIL_PASS ? process.env.EMAIL_PASS : 'NOT SET',
+    NODE_ENV: process.env.NODE_ENV || 'NOT SET',
+    allEnvKeys: Object.keys(process.env).filter(key =>
+      key.includes('EMAIL') || key.includes('CLIENT') || key.includes('NODE')
+    ),
+    mailkeys: {
+      email: process.env.EMAIL_USER === "chandup12121@gmail.com" ? true : false,
+      password: process.env.EMAIL_PASS === "dnhg isec kwru bbqj" ? true : false,
+    },
+  });
+});
+
 // Serve uploaded files statically
 app.use('/uploads', express.static('uploads'));
 
