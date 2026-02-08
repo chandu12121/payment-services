@@ -21,7 +21,7 @@ if (process.env.REDIS_URL) {
  * @param {Object} options - Rate limit options
  */
 const createRateLimiter = (options = {}) => {
-const {
+  const {
     windowMs = 15 * 60 * 1000, // 15 minutes
     max = 1000000, // limit each IP to 1000000 requests per windowMs
     message = "Too many requests from this IP, please try again later.",
@@ -36,7 +36,7 @@ const {
     ? new RedisStore({
       client: redisClient,
       prefix: "rate_limit:"
-    })  
+    })
     : undefined; // Use in-memory store if Redis not available
 
   const limiterOptions = {
@@ -80,27 +80,27 @@ const rateLimiters = {
   // Global API rate limiter
   apiLimiter: createRateLimiter({
     windowMs: 15 * 60 * 1000,
-    max: 1000
+    max: 1000000
   }),
 
   // Strict rate limiter for sensitive operations
   strictLimiter: createRateLimiter({
     windowMs: 60 * 60 * 1000,
-    max: 10,
+    max: 1000000,
     message: "Too many attempts. Please try again in an hour."
   }),
 
   // Authentication rate limiter
   authLimiter: createRateLimiter({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    max: 1000000,
     message: "Too many authentication attempts. Please try again later."
   }),
 
   // Registration rate limiter
   registrationLimiter: createRateLimiter({
     windowMs: 60 * 60 * 1000,
-    max: 3,
+    max: 1000000,
     message: "Too many registration attempts from this IP. Please try again later."
   })
 };

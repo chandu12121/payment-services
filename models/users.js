@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const validator = require("validator");
 
 // Define user roles and permissions
 const USER_ROLES = {
@@ -39,7 +38,7 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         trim: true,
         validate: {
-            validator: validator.isEmail,
+            validator: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
             message: "Please provide a valid email address"
         }
     },
@@ -51,7 +50,7 @@ const userSchema = new mongoose.Schema({
         trim: true,
         validate: {
             validator: function (v) {
-                return v === '' || validator.isEmail(v);
+                return v === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
             },
             message: "Please provide a valid alternate email address"
         }
@@ -62,7 +61,7 @@ const userSchema = new mongoose.Schema({
         trim: true,
         validate: {
             validator: function (v) {
-                return v === '' || validator.isMobilePhone(v, 'any', { strictMode: false });
+                return v === '' || /^\+?[1-9]\d{1,14}$/.test(v);
             },
             message: "Please provide a valid phone number"
         }

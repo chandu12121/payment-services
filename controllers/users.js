@@ -4,7 +4,6 @@ const ActivityLog = require("../models/ActivityLog");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
-const validator = require("validator");
 const {
     sendVerificationEmail,
     sendPasswordResetEmail,
@@ -19,6 +18,7 @@ const {
     notifyPasswordResetSuccess,
     notifyEmailVerified
 } = require("../utils/notificationHelper");
+const logger = require("../utils/logger");
 
 // ==================== HELPER FUNCTIONS ====================
 const generateAuthResponse = (user, deviceInfo = {}) => {
@@ -50,39 +50,6 @@ const generateAuthResponse = (user, deviceInfo = {}) => {
     };
 };
 
-const validateUserData = (data, isUpdate = false) => {
-    const errors = {};
-
-    // Validate email
-    if (data.email && !validator.isEmail(data.email)) {
-        errors.email = "Please provide a valid email address";
-    }
-
-    // Validate phone
-    if (data.phone && !validator.isMobilePhone(data.phone, 'any', { strictMode: false })) {
-        errors.phone = "Please provide a valid phone number";
-    }
-
-    // Validate date of birth (minimum age 13)
-    if (data.dateOfBirth) {
-        const dob = new Date(data.dateOfBirth);
-        const age = new Date().getFullYear() - dob.getFullYear();
-        if (age < 13) {
-            errors.dateOfBirth = "User must be at least 13 years old";
-        }
-    }
-
-    // Validate password strength (for registration)
-    if (!isUpdate && data.password && data.password.length < 8) {
-        errors.password = "Password must be at least 8 characters";
-    }
-
-    return {
-        isValid: Object.keys(errors).length === 0,
-        errors
-    };
-};
-
 // ==================== AUTHENTICATION CONTROLLERS ====================
 
 /**
@@ -97,15 +64,6 @@ const registerUser = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 error: "Name, email, address, and password are required"
-            });
-        }
-
-        // Validate user data
-        const validation = validateUserData({ email, phone, dateOfBirth, password });
-        if (!validation.isValid) {
-            return res.status(400).json({
-                success: false,
-                errors: validation.errors
             });
         }
 
@@ -141,10 +99,10 @@ const registerUser = async (req, res) => {
             const referrer = await User.findOne({ referralCode });
             if (referrer) {
                 referredBy = referrer._id;
-                // You might want to add referral bonus here
-                await User.findByIdAndUpdate(referrer._id, {
+                // Update referral count asynchronously
+                User.findByIdAndUpdate(referrer._id, {
                     $inc: { referralCount: 1 }
-                });
+                }).catch(err => console.error('Referral count update error:', err));
             }
         }
 
@@ -168,28 +126,39 @@ const registerUser = async (req, res) => {
             }));
         }
 
-        const newUser = new User(userData);
-        const user = await newUser.save();
-
-        // Send verification email
+        const user = new User(userData);
         const verificationToken = user.createEmailVerificationToken();
         await user.save();
 
         const clientUrl = process.env.CLIENT_URL;
-        await sendVerificationEmail({
-            email: user.email,
-            name: user.name,
-            verificationUrl: `${clientUrl}/verify-email/${verificationToken}`
-        });
 
-        // Send welcome email
-        await sendWelcomeEmail({
-            email: user.email,
-            name: user.name
-        });
+        // Send verification email asynchronously (non-blocking)
+        (async () => {
+            try {
+                await sendVerificationEmail({
+                    email: user.email,
+                    name: user.name,
+                    verificationUrl: `${clientUrl}/verify-email/${verificationToken}`
+                });
+            } catch (error) {
+                console.error('Verification email error:', error);
+            }
+        })();
 
-        // Log registration activity
-        await createActivityLog({
+        // Send welcome email asynchronously (non-blocking)
+        (async () => {
+            try {
+                await sendWelcomeEmail({
+                    email: user.email,
+                    name: user.name
+                });
+            } catch (error) {
+                console.error('Welcome email error:', error);
+            }
+        })();
+
+        // Log registration activity asynchronously
+        createActivityLog({
             userId: user._id,
             type: 'security',
             action: 'Account Created',
@@ -197,10 +166,16 @@ const registerUser = async (req, res) => {
             ip: req.ip,
             device: req.headers['user-agent'],
             status: 'success'
-        });
+        }).catch(err => console.error('Registration log error:', err));
 
-        // Trigger in-app welcome notification
-        notifyWelcome(user._id, user.name).catch(e => console.error(`Welcome notification failed: ${e.message}`));
+        // Trigger in-app welcome notification asynchronously (non-blocking)
+        (async () => {
+            try {
+                await notifyWelcome(user._id, user.name);
+            } catch (e) {
+                console.error(`Welcome notification failed: ${e.message}`);
+            }
+        })();
 
         // Generate auth response
         const authResponse = generateAuthResponse(user, {
@@ -241,7 +216,7 @@ const loginUser = async (req, res) => {
             });
         }
 
-        // Find user with password (bypass soft-delete filter initially to check status)
+        // Find user with password
         const query = email ? { email } : { phone };
         const user = await User.findOne(query).setOptions({ includeDeleted: true }).select('+password');
         if (!user) {
@@ -274,7 +249,6 @@ const loginUser = async (req, res) => {
         // Verify password
         const isPasswordValid = await user.comparePassword(password);
         if (!isPasswordValid) {
-            // Increment failed login attempts if you track them
             return res.status(401).json({
                 success: false,
                 error: "Invalid credentials"
@@ -288,7 +262,7 @@ const loginUser = async (req, res) => {
         await user.save();
 
         // Generate auth response
-        const deviceInfo = {
+        const deviceInfoToken = {
             deviceId: deviceId || req.headers['device-id'] || `web-${Date.now()}`,
             deviceType: req.headers['device-type'] || 'web',
             os: req.headers['os'] || 'unknown',
@@ -297,7 +271,7 @@ const loginUser = async (req, res) => {
             location: req.headers['geo-location'] ? JSON.parse(req.headers['geo-location']) : undefined
         };
 
-        const authResponse = generateAuthResponse(user, deviceInfo);
+        const authResponse = generateAuthResponse(user, deviceInfoToken);
 
         // Log login activity
         await createActivityLog({
@@ -465,15 +439,6 @@ const updateProfile = async (req, res) => {
         delete updateData.createdAt;
         delete updateData.updatedAt;
 
-        // Validate update data
-        const validation = validateUserData(updateData, true);
-        if (!validation.isValid) {
-            return res.status(400).json({
-                success: false,
-                errors: validation.errors
-            });
-        }
-
         // Check if phone is already taken by another user
         if (updateData.phone) {
             const existingPhone = await User.findOne({
@@ -536,7 +501,11 @@ const updateProfile = async (req, res) => {
         });
 
         // Trigger in-app notification
-        notifyAccountUpdate(userId, 'profile').catch(e => console.error(`Profile update notification failed: ${e.message}`));
+        try {
+            await notifyAccountUpdate(userId, 'profile');
+        } catch (e) {
+            console.error(`Profile update notification failed: ${e.message}`);
+        }
 
     } catch (error) {
         console.error("Update profile error:", error);
@@ -730,11 +699,15 @@ const changePassword = async (req, res) => {
         await user.save();
 
         // Send notification email
-        await sendPasswordResetEmail({
-            email: user.email,
-            name: user.name,
-            type: 'password_changed'
-        });
+        try {
+            await sendPasswordResetEmail({
+                email: user.email,
+                name: user.name,
+                type: 'password_changed'
+            });
+        } catch (error) {
+            console.error('Password changed email error:', error);
+        }
 
         res.status(200).json({
             success: true,
@@ -753,7 +726,11 @@ const changePassword = async (req, res) => {
         });
 
         // Trigger in-app notification
-        notifyAccountUpdate(userId, 'password').catch(e => console.error(`Password change notification failed: ${e.message}`));
+        try {
+            await notifyAccountUpdate(userId, 'password');
+        } catch (e) {
+            console.error(`Password change notification failed: ${e.message}`);
+        }
 
     } catch (error) {
         console.error("Change password error:", error);
@@ -802,15 +779,29 @@ const forgotPassword = async (req, res) => {
         const clientUrl = process.env.CLIENT_URL;
         const resetUrl = `${clientUrl}/reset-password/${resetToken}`;
 
-        await sendPasswordResetEmail({
-            email: user.email,
-            name: user.name,
-            resetUrl,
-            type: 'reset_request'
-        });
+        // Send reset email asynchronously (non-blocking)
+        (async () => {
+            try {
+                await sendPasswordResetEmail({
+                    email: user.email,
+                    name: user.name,
+                    resetUrl,
+                    type: 'reset_request'
+                });
+            } catch (error) {
+                console.error('Password reset email error:', error);
+            }
+        })();
 
-        // Trigger in-app notification
-        notifyPasswordResetRequest(user._id).catch(e => console.error(`Reset request notification failed: ${e.message}`));
+
+        // Trigger in-app notification asynchronously
+        (async () => {
+            try {
+                await notifyPasswordResetRequest(user._id);
+            } catch (e) {
+                console.error(`Reset request notification failed: ${e.message}`);
+            }
+        })();
 
         res.status(200).json({
             success: true,
@@ -875,14 +866,22 @@ const resetPassword = async (req, res) => {
         await user.save();
 
         // Send confirmation email
-        await sendPasswordResetEmail({
-            email: user.email,
-            name: user.name,
-            type: 'password_reset'
-        });
+        try {
+            await sendPasswordResetEmail({
+                email: user.email,
+                name: user.name,
+                type: 'password_reset'
+            });
+        } catch (error) {
+            console.error('Password reset success email error:', error);
+        }
 
         // Trigger in-app notification
-        notifyPasswordResetSuccess(user._id).catch(e => console.error(`Reset success notification failed: ${e.message}`));
+        try {
+            await notifyPasswordResetSuccess(user._id);
+        } catch (e) {
+            console.error(`Reset success notification failed: ${e.message}`);
+        }
 
         // Log password reset activity
         await createActivityLog({
@@ -962,7 +961,11 @@ const verifyEmail = async (req, res) => {
         await user.save();
 
         // Trigger in-app notification
-        notifyEmailVerified(user._id).catch(e => console.error(`Email verification notification failed: ${e.message}`));
+        try {
+            await notifyEmailVerified(user._id);
+        } catch (e) {
+            console.error(`Email verification notification failed: ${e.message}`);
+        }
 
         // Log email verification
         await createActivityLog({
@@ -975,9 +978,17 @@ const verifyEmail = async (req, res) => {
             status: 'success'
         });
 
+        // Generate auth response for auto-login
+        const authResponse = generateAuthResponse(user, {
+            deviceId: req.headers['device-id'],
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent']
+        });
+
         res.status(200).json({
             success: true,
-            message: "Email verified successfully"
+            message: "Email verified successfully. You have been automatically logged in.",
+            data: authResponse
         });
 
     } catch (error) {
@@ -1025,11 +1036,15 @@ const resendVerificationEmail = async (req, res) => {
 
         // Send verification email
         const clientUrl = process.env.CLIENT_URL;
-        await sendVerificationEmail({
-            email: user.email,
-            name: user.name,
-            verificationUrl: `${clientUrl}/verify-email/${verificationToken}`
-        });
+        try {
+            await sendVerificationEmail({
+                email: user.email,
+                name: user.name,
+                verificationUrl: `${clientUrl}/verify-email/${verificationToken}`
+            });
+        } catch (error) {
+            console.error('Resend verification email error:', error);
+        }
 
         res.status(200).json({
             success: true,
@@ -1358,13 +1373,17 @@ const updateUserById = async (req, res) => {
 
         // Send status change email if needed
         if (shouldSendStatusEmail && userBeforeUpdate?.email) {
-            await sendAccountStatusChangeEmail({
-                email: userBeforeUpdate.email,
-                name: userBeforeUpdate.name,
-                oldStatus: userBeforeUpdate.status,
-                newStatus: updateData.status,
-                reason: updateData.statusChangeReason
-            });
+            try {
+                await sendAccountStatusChangeEmail({
+                    email: userBeforeUpdate.email,
+                    name: userBeforeUpdate.name,
+                    oldStatus: userBeforeUpdate.status,
+                    newStatus: updateData.status,
+                    reason: updateData.statusChangeReason
+                });
+            } catch (error) {
+                console.error('Account status change email error:', error);
+            }
         }
 
         res.status(200).json({
@@ -1560,7 +1579,7 @@ const getUserStatistics = async (req, res) => {
 const getActivityLogs = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const { limit = 20, page = 1 } = req.query;
+        const { limit = 10, page = 1 } = req.query;
 
         const logs = await ActivityLog.find({ userId })
             .sort({ timestamp: -1 })
@@ -1588,7 +1607,7 @@ const createActivityLog = async (data) => {
             timestamp: new Date()
         });
     } catch (error) {
-        console.error("Error creating activity log:", error);
+        logger.error("Error creating activity log:", error);
         // Don't throw, we don't want to break the main flow if logging fails
     }
 };

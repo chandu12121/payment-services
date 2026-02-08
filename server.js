@@ -6,10 +6,8 @@ require('dotenv').config();
 
 const paymentRoutes = require("./routes/payment");
 const userRoutes = require("./routes/user"); // Import user routes
+// Database connection is managed within the startServer function
 const connectDB = require("./config/db");
-
-// Connect to Database
-// Database connection handled before server startup
 
 // Start Cron Jobs
 const startPaymentCleanupJob = require("./cron/paymentCleanup");
@@ -156,9 +154,11 @@ initSocket(server);
 const startServer = async () => {
   try {
     // Attempt to connect to database
-    connectDB().catch(err => {
+    try {
+      await connectDB();
+    } catch (err) {
       console.error('Database connection failed during startup:', err.message);
-    });
+    }
 
     server.listen(PORT, () => {
       console.log(`Payment API server running on port ${PORT}`);

@@ -1,6 +1,7 @@
 const Invoice = require("../models/Invoice");
 const PDFDocument = require('pdfkit');
 const logger = require("../utils/logger");
+const { createNotification } = require("../utils/notificationHelper");
 
 // Get all invoices for the current user
 const getUserInvoices = async (req, res) => {
@@ -239,15 +240,18 @@ const downloadInvoice = async (req, res) => {
         doc.end();
 
         // Trigger in-app notification for download (only if user is authenticated)
-        const { createNotification } = require("../utils/notificationHelper");
         if (req.user?.userId) {
-            createNotification(
-                req.user.userId,
-                'info',
-                'Invoice Downloaded',
-                `Invoice #${invoice.invoiceNumber} has been downloaded successfully.`,
-                { invoiceId: invoice.invoiceNumber, link: '/invoices' }
-            ).catch(e => logger.error(`Download notification failed: ${e.message}`));
+            try {
+                await createNotification(
+                    req.user.userId,
+                    'info',
+                    'Invoice Downloaded',
+                    `Invoice #${invoice.invoiceNumber} has been downloaded successfully.`,
+                    { invoiceId: invoice.invoiceNumber, link: '/invoices' }
+                );
+            } catch (e) {
+                logger.error(`Download notification failed: ${e.message}`);
+            }
         }
 
     } catch (error) {

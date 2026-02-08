@@ -239,49 +239,61 @@ const verifyPayment = async (req, res) => {
       logger.info(`Dispatching invoice email to: ${personalDetails.email}`);
       const invoicePdfUrl = `${process.env.API_URL || 'http://localhost:3000'}/api/invoices/${invoice._id}/download`;
 
-      sendInvoice({
-        to: personalDetails.email,
-        name: personalDetails.name,
-        invoiceNumber: invoice.invoiceNumber,
-        amount: invoice.amount,
-        currency: booking.currency,
-        items: invoice.items,
-        pdfUrl: invoicePdfUrl,
-        transactionDetails: {
-          transactionId: transaction.transactionNumber,
-          paymentDate: new Date().toLocaleDateString('en-IN', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
-          }),
-          paymentMethod: fullPaymentDetails.method || 'Card',
-          status: 'SUCCESS'
+      // Send Email asynchronously
+      (async () => {
+        try {
+          await sendInvoice({
+            to: personalDetails.email,
+            name: personalDetails.name,
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.amount,
+            currency: booking.currency,
+            items: invoice.items,
+            pdfUrl: invoicePdfUrl,
+            transactionDetails: {
+              transactionId: transaction.transactionNumber,
+              paymentDate: new Date().toLocaleDateString('en-IN', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+              }),
+              paymentMethod: fullPaymentDetails.method || 'Card',
+              status: 'SUCCESS'
+            }
+          });
+        } catch (emailError) {
+          logger.error(`Email sending background failure: ${emailError.message}`);
         }
-      }).catch(emailError => {
-        logger.error(`Email sending background failure: ${emailError.message}`);
-      });
+      })();
     }
 
     // 7. Trigger Unified Multi-Channel Notifications (In-app + Email)
     if (invoice) {
       const derivedUserId = userId || req.user.userId;
-      notifyPaymentComplete(
-        derivedUserId,
-        {
-          transactionId: transaction.transactionNumber,
-          amount: invoice.totalAmount,
-          currency: booking.currency,
-          email: personalDetails.email,
-          name: personalDetails.name,
-          method: fullPaymentDetails.method || 'Card'
-        },
-        {
-          invoiceNumber: invoice.invoiceNumber,
-          invoiceId: invoice._id,
-          items: invoice.items
+      // Trigger notifications asynchronously
+      (async () => {
+        try {
+          await notifyPaymentComplete(
+            derivedUserId,
+            {
+              transactionId: transaction.transactionNumber,
+              amount: invoice.totalAmount,
+              currency: booking.currency,
+              email: personalDetails.email,
+              name: personalDetails.name,
+              method: fullPaymentDetails.method || 'Card'
+            },
+            {
+              invoiceNumber: invoice.invoiceNumber,
+              invoiceId: invoice._id,
+              items: invoice.items
+            }
+          );
+        } catch (e) {
+          logger.error(`Unified notification failed: ${e.message}`);
         }
-      ).catch(e => logger.error(`Unified notification failed: ${e.message}`));
+      })();
     }
 
     logger.info(`VerifyPayment completed successfully for user: ${userId || req.user.userId}`);
@@ -299,8 +311,13 @@ const verifyPayment = async (req, res) => {
     // Trigger in-app notification for failure if user is available
     const derivedUserId = req.body.userId || req.user?.userId;
     if (derivedUserId && req.body.paymentDetails?.amount) {
-      notifyPaymentFailed(derivedUserId, req.body.paymentDetails.amount, error.message)
-        .catch(e => logger.error(`Failure notification failed: ${e.message}`));
+      if (derivedUserId && req.body.paymentDetails?.amount) {
+        try {
+          await notifyPaymentFailed(derivedUserId, req.body.paymentDetails.amount, error.message);
+        } catch (e) {
+          logger.error(`Failure notification failed: ${e.message}`);
+        }
+      }
     }
 
     return res.status(500).json({
@@ -539,17 +556,21 @@ const refundPayment = async (req, res) => {
     });
 
     // Trigger Unified Multi-Channel Notification for Refund
-    notifyRefundComplete(
-      req.user.userId,
-      {
-        refundId: refund.id,
-        amount: refundAmount,
-        currency: booking.currency || "INR",
-        transactionId: booking.razorpayPaymentId
-      },
-      booking.customerDetails?.email,
-      booking.customerDetails?.name
-    ).catch(e => logger.error(`Unified refund notification failed: ${e.message}`));
+    try {
+      await notifyRefundComplete(
+        req.user.userId,
+        {
+          refundId: refund.id,
+          amount: refundAmount,
+          currency: booking.currency || "INR",
+          transactionId: booking.razorpayPaymentId
+        },
+        booking.customerDetails?.email,
+        booking.customerDetails?.name
+      );
+    } catch (e) {
+      logger.error(`Unified refund notification failed: ${e.message}`);
+    }
 
     return res.status(200).json({
       success: true,

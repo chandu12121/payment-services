@@ -51,37 +51,42 @@ const notifyPaymentComplete = async (userId, paymentData, invoiceData) => {
     logger.info(`In-app notification sent for payment: ${transactionId}`);
 
     // 2. Send Email with downloadable invoice
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    await sendInvoice({
-      to: paymentData.email,
-      name: paymentData.name,
-      invoiceNumber: invoiceNumber,
-      amount: amount,
-      currency: currency,
-      items: items || [],
-      pdfUrl: invoicePdfUrl,
-      clientUrl: clientUrl,
-      transactionDetails: {
-        transactionId,
-        paymentDate: new Date().toLocaleDateString('en-IN', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric'
-        }),
-        paymentMethod: paymentData.method || 'Card',
-        status: 'SUCCESS'
-      }
-    }).then(() => {
+    try {
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+      await sendInvoice({
+        to: paymentData.email,
+        name: paymentData.name,
+        invoiceNumber: invoiceNumber,
+        amount: amount,
+        currency: currency,
+        items: items || [],
+        pdfUrl: invoicePdfUrl,
+        clientUrl: clientUrl,
+        transactionDetails: {
+          transactionId,
+          paymentDate: new Date().toLocaleDateString('en-IN', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+          }),
+          paymentMethod: paymentData.method || 'Card',
+          status: 'SUCCESS'
+        }
+      });
       logger.info(`Invoice email sent to: ${paymentData.email}`);
-    }).catch(err => {
+    } catch (err) {
       logger.error(`Failed to send invoice email: ${err.message}`);
-      // Update notification status
-      Notification.updateOne(
-        { _id: inAppNotification._id },
-        { $set: { status: 'SENT' } }
-      ).catch(e => logger.error(`Failed to update notification: ${e.message}`));
-    });
+      // Update notification status (best effort)
+      try {
+        await Notification.updateOne(
+          { _id: inAppNotification._id },
+          { $set: { status: 'SENT' } }
+        );
+      } catch (e) {
+        logger.error(`Failed to update notification: ${e.message}`);
+      }
+    }
 
     return inAppNotification;
 
@@ -127,17 +132,18 @@ const notifyRefundComplete = async (userId, refundData, userEmail, userName) => 
     logger.info(`In-app notification sent for refund: ${refundId}`);
 
     // 2. Send Email notification
-    await sendRefundEmail({
-      email: userEmail,
-      name: userName,
-      refundId,
-      amount,
-      currency
-    }).then(() => {
+    try {
+      await sendRefundEmail({
+        email: userEmail,
+        name: userName,
+        refundId,
+        amount,
+        currency
+      });
       logger.info(`Refund email sent to: ${userEmail}`);
-    }).catch(err => {
+    } catch (err) {
       logger.error(`Failed to send refund email: ${err.message}`);
-    });
+    }
 
     return inAppNotification;
 
