@@ -755,12 +755,22 @@ const forgotPassword = async (req, res) => {
             });
         }
 
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                error: "Please enter a valid email address"
+            });
+        }
+
         // Check for user (including soft-deleted)
         const user = await User.findOne({ email }).setOptions({ includeDeleted: true });
         if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: "This email is not registered. Please create an account or use a different email."
+            // Consider returning a generic message for security
+            return res.status(200).json({
+                success: true,
+                message: "If your email is registered, you'll receive a password reset link shortly."
             });
         }
 
@@ -779,40 +789,62 @@ const forgotPassword = async (req, res) => {
         const clientUrl = process.env.CLIENT_URL;
         const resetUrl = `${clientUrl}/reset-password/${resetToken}`;
 
-        // Send reset email asynchronously (non-blocking)
-        (async () => {
-            try {
-                await sendPasswordResetEmail({
+        try {
+            // Add timeout to email sending
+            await Promise.race([
+                sendPasswordResetEmail({
                     email: user.email,
                     name: user.name,
                     resetUrl,
                     type: 'reset_request'
-                });
-            } catch (error) {
-                console.error('Password reset email error:', error);
-            }
-        })();
+                }),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Email sending timeout')), 10000)
+                )
+            ]);
 
+            console.log(`Password reset email sent to ${user.email}`);
 
-        // Trigger in-app notification asynchronously
-        (async () => {
-            try {
-                await notifyPasswordResetRequest(user._id);
-            } catch (e) {
-                console.error(`Reset request notification failed: ${e.message}`);
-            }
-        })();
+            // Trigger in-app notification
+            notifyPasswordResetRequest(user._id).catch(e => {
+                console.error(`Reset notification failed: ${e.message}`);
+            });
 
-        res.status(200).json({
-            success: true,
-            message: "Password reset link sent to your email"
-        });
+            return res.status(200).json({
+                success: true,
+                message: "Password reset link sent to your email",
+                // Optionally include email for debugging (remove in production)
+                debug: process.env.NODE_ENV === 'development' ? { email: user.email } : undefined
+            });
+
+        } catch (emailError) {
+            console.error('Failed to send password reset email:', emailError);
+
+            // Remove the reset token since email failed
+            user.passwordResetToken = undefined;
+            user.passwordResetExpires = undefined;
+            await user.save();
+
+            return res.status(500).json({
+                success: false,
+                error: "Failed to send reset email. Please try again later."
+            });
+        }
 
     } catch (error) {
         console.error("Forgot password error:", error);
+
+        // More specific error messages
+        let errorMessage = "Failed to process password reset request";
+        if (error.name === 'MongoError' || error.name === 'MongoServerError') {
+            errorMessage = "Database error. Please try again.";
+        } else if (error.code === 'ETIMEDOUT') {
+            errorMessage = "Request timeout. Please try again.";
+        }
+
         res.status(500).json({
             success: false,
-            error: "Failed to process password reset request"
+            error: errorMessage
         });
     }
 };
