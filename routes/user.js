@@ -11,6 +11,7 @@ const {
     updateProfile,
     uploadProfileImage,
     deleteProfileImage,
+    getActivityLogs,
 
     // Password Management
     changePassword,
@@ -181,6 +182,17 @@ router.get(
 );
 
 /**
+ * @route   GET /api/users/me/activity-logs
+ * @desc    Get activity logs for current user
+ * @access  Private
+ */
+router.get(
+    "/me/activity-logs",
+    authenticate,
+    getActivityLogs
+);
+
+/**
  * @route   PUT /api/users/me
  * @desc    Update current user profile
  * @access  Private
@@ -232,6 +244,7 @@ router.post(
         keyGenerator: (req) => req.user.userId
     }),
     upload.single("profileImage"),
+    upload.handleUploadError,
     uploadProfileImage
 );
 

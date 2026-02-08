@@ -5,11 +5,102 @@ const logger = require("../utils/logger");
 // Get all invoices for the current user
 const getUserInvoices = async (req, res) => {
     try {
-        const invoices = await Invoice.find({ userId: req.user.userId })
-            .sort({ createdAt: -1 })
-            .populate('bookingId', 'bookingNumber bookingType');
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        const statusFilter = req.query.status || 'all';
+        const searchTerm = req.query.search || '';
+        const sortBy = req.query.sortBy || 'newest';
 
-        return res.status(200).json({ success: true, data: invoices });
+        // Build filter query
+        const query = { userId: req.user.userId };
+
+        // Add status filter
+        if (statusFilter !== 'all') {
+            query.status = statusFilter;
+        }
+
+        // Add search filter
+        if (searchTerm) {
+            query.$or = [
+                { invoiceNumber: { $regex: searchTerm, $options: 'i' } },
+                { 'customerDetails.name': { $regex: searchTerm, $options: 'i' } },
+                { 'customerDetails.email': { $regex: searchTerm, $options: 'i' } }
+            ];
+        }
+
+        // Determine sort order
+        let sortObject = { createdAt: -1 }; // default: newest first
+        if (sortBy === 'oldest') {
+            sortObject = { createdAt: 1 };
+        } else if (sortBy === 'amount-high') {
+            sortObject = { totalAmount: -1 };
+        } else if (sortBy === 'amount-low') {
+            sortObject = { totalAmount: 1 };
+        }
+
+        // Get paginated invoices and calculate stats for ALL filtered data
+        const [invoices, total, statsAgg] = await Promise.all([
+            Invoice.find(query)
+                .sort(sortObject)
+                .populate('bookingId', 'bookingNumber bookingType')
+                .skip(skip)
+                .limit(limit),
+            Invoice.countDocuments(query),
+            // Get stats for ALL filtered data (not just current page)
+            Invoice.aggregate([
+                { $match: query },
+                {
+                    $group: {
+                        _id: null,
+                        totalAmount: { $sum: '$totalAmount' },
+                        paidCount: {
+                            $sum: { $cond: [{ $eq: ['$status', 'paid'] }, 1, 0] }
+                        },
+                        pendingCount: {
+                            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+                        },
+                        voidCount: {
+                            $sum: { $cond: [{ $eq: ['$status', 'void'] }, 1, 0] }
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        totalAmount: { $divide: ['$totalAmount', 100] },
+                        paidCount: 1,
+                        pendingCount: 1,
+                        voidCount: 1
+                    }
+                }
+            ])
+        ]);
+
+        // Extract stats from aggregation result
+        const stats = statsAgg.length > 0 ? statsAgg[0] : {
+            totalAmount: 0,
+            paidCount: 0,
+            pendingCount: 0,
+            voidCount: 0
+        };
+
+        return res.status(200).json({
+            success: true,
+            data: invoices,
+            stats: {
+                total,
+                paid: stats.paidCount,
+                pending: stats.pendingCount,
+                void: stats.voidCount,
+                totalAmount: stats.totalAmount
+            },
+            pagination: {
+                total,
+                page,
+                pages: Math.ceil(total / limit),
+                limit
+            }
+        });
     } catch (error) {
         logger.error(`Get Invoices Error: ${error.message}`);
         return res.status(500).json({ success: false, error: "Failed to fetch invoices" });
@@ -39,11 +130,11 @@ const downloadInvoice = async (req, res) => {
     let doc;
     try {
         const { id } = req.params;
-        
+
         // Build query - support both ObjectId and invoiceNumber
         const query = {};
         const isObjectId = /^[0-9a-fA-F]{24}$/.test(id);
-        
+
         if (isObjectId) {
             query._id = id;
         } else {
@@ -150,13 +241,13 @@ const downloadInvoice = async (req, res) => {
         // Trigger in-app notification for download (only if user is authenticated)
         const { createNotification } = require("../utils/notificationHelper");
         if (req.user?.userId) {
-          createNotification(
-            req.user.userId,
-            'info',
-            'Invoice Downloaded',
-            `Invoice #${invoice.invoiceNumber} has been downloaded successfully.`,
-            { invoiceId: invoice.invoiceNumber, link: '/invoices' }
-          ).catch(e => logger.error(`Download notification failed: ${e.message}`));
+            createNotification(
+                req.user.userId,
+                'info',
+                'Invoice Downloaded',
+                `Invoice #${invoice.invoiceNumber} has been downloaded successfully.`,
+                { invoiceId: invoice.invoiceNumber, link: '/invoices' }
+            ).catch(e => logger.error(`Download notification failed: ${e.message}`));
         }
 
     } catch (error) {

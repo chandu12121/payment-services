@@ -238,7 +238,7 @@ const verifyPayment = async (req, res) => {
     if (personalDetails?.email && invoice) {
       logger.info(`Dispatching invoice email to: ${personalDetails.email}`);
       const invoicePdfUrl = `${process.env.API_URL || 'http://localhost:3000'}/api/invoices/${invoice._id}/download`;
-      
+
       sendInvoice({
         to: personalDetails.email,
         name: personalDetails.name,
@@ -313,8 +313,88 @@ const verifyPayment = async (req, res) => {
 
 const getUserTransactions = async (req, res) => {
   try {
-    const transactions = await Transactions.find({ userId: req.user.userId }).sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, data: transactions });
+    const { page = 1, limit = 10, status, method, search, sortBy = 'newest' } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { userId: req.user.userId };
+
+    if (status && status !== 'all') query.status = status;
+    if (method && method !== 'all') query.method = method;
+    if (search) {
+      query.$or = [
+        { transactionNumber: { $regex: search, $options: 'i' } },
+        { razorpayPaymentId: { $regex: search, $options: 'i' } },
+        { 'customer.email': { $regex: search, $options: 'i' } },
+        { 'customer.contact': { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    let sortOptions = { createdAt: -1 };
+    if (sortBy === 'oldest') sortOptions = { createdAt: 1 };
+    else if (sortBy === 'amount-high') sortOptions = { amount: -1 };
+    else if (sortBy === 'amount-low') sortOptions = { amount: 1 };
+
+    // Get paginated transactions and stats for ALL filtered data
+    const [transactions, total, statsAgg] = await Promise.all([
+      Transactions.find(query)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Transactions.countDocuments(query),
+      // Get stats for ALL filtered data (not just current page)
+      Transactions.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            successCount: {
+              $sum: { $cond: [{ $in: ['$status', ['success', 'captured']] }, 1, 0] }
+            },
+            failedCount: {
+              $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
+            },
+            refundedCount: {
+              $sum: { $cond: [{ $eq: ['$status', 'refunded'] }, 1, 0] }
+            }
+          }
+        },
+        {
+          $project: {
+            totalAmount: { $divide: ['$totalAmount', 100] },
+            successCount: 1,
+            failedCount: 1,
+            refundedCount: 1
+          }
+        }
+      ])
+    ]);
+
+    // Extract stats from aggregation result
+    const stats = statsAgg.length > 0 ? statsAgg[0] : {
+      totalAmount: 0,
+      successCount: 0,
+      failedCount: 0,
+      refundedCount: 0
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: transactions,
+      stats: {
+        total,
+        successful: stats.successCount,
+        failed: stats.failedCount,
+        refunded: stats.refundedCount,
+        totalAmount: stats.totalAmount
+      },
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        limit: parseInt(limit)
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }

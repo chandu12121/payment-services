@@ -5,7 +5,7 @@ const Invoice = require('../models/Invoice');
 // Get all notifications for the user
 exports.getNotifications = async (req, res) => {
     try {
-        const { page = 1, limit = 20, unreadOnly = false } = req.query;
+        const { page = 1, limit = 10, unreadOnly = false } = req.query;
         const userId = req.user.userId;
 
         const query = { user: userId };

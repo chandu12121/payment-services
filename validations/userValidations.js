@@ -59,7 +59,7 @@ const updateProfileSchema = Joi.object({
     preferences: Joi.object({
         language: Joi.string().valid("en", "hi", "es", "fr", "de"),
         currency: Joi.string().valid("INR", "USD", "EUR", "GBP"),
-        timezone: Joi.string(),
+        timezone: Joi.string().allow('', null),
         notifications: Joi.object({
             email: Joi.boolean(),
             sms: Joi.boolean(),
@@ -67,7 +67,15 @@ const updateProfileSchema = Joi.object({
             marketing: Joi.boolean()
         }),
         theme: Joi.string().valid("light", "dark", "auto")
-    })
+    }).optional(),
+    businessDetails: Joi.object({
+        businessName: Joi.string().allow('', null),
+        gstNumber: Joi.string().pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/).allow('', null),
+        panNumber: Joi.string().pattern(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/).allow('', null),
+        businessType: Joi.string().allow('', null),
+        registrationNumber: Joi.string().allow('', null),
+        taxId: Joi.string().allow('', null)
+    }).optional()
 }).min(1); // At least one field required
 
 const changePasswordSchema = Joi.object({

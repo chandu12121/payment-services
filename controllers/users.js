@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { User, USER_ROLES, USER_STATUS } = require("../models/users");
+const ActivityLog = require("../models/ActivityLog");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
@@ -10,7 +11,6 @@ const {
     sendWelcomeEmail,
     sendAccountStatusChangeEmail
 } = require("../services/emailNotification");
-const { uploadFile, deleteFile } = require("../services/fileUpload");
 const { generateOTP, verifyOTP } = require("../services/otpService");
 const {
     notifyAccountUpdate,
@@ -42,6 +42,8 @@ const generateAuthResponse = (user, deviceInfo = {}) => {
             phoneVerified: user.phoneVerified,
             profileImage: user.profileImage,
             preferences: user.preferences,
+            businessDetails: user.businessDetails,
+            addresses: user.addresses,
             kycStatus: user.kycStatus,
             walletBalance: user.walletBalance
         }
@@ -186,6 +188,17 @@ const registerUser = async (req, res) => {
             name: user.name
         });
 
+        // Log registration activity
+        await createActivityLog({
+            userId: user._id,
+            type: 'security',
+            action: 'Account Created',
+            description: 'New user registration via System',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
+
         // Trigger in-app welcome notification
         notifyWelcome(user._id, user.name).catch(e => console.error(`Welcome notification failed: ${e.message}`));
 
@@ -285,6 +298,17 @@ const loginUser = async (req, res) => {
         };
 
         const authResponse = generateAuthResponse(user, deviceInfo);
+
+        // Log login activity
+        await createActivityLog({
+            userId: user._id,
+            type: 'login',
+            action: 'Account Login',
+            description: 'Logged in via Web Application',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
 
         res.status(200).json({
             success: true,
@@ -403,6 +427,17 @@ const getCurrentUser = async (req, res) => {
             data: user
         });
 
+        // Log profile access
+        await createActivityLog({
+            userId: req.user.userId,
+            type: 'security',
+            action: 'Profile Accessed',
+            description: 'Viewed profile in User Settings',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
+
     } catch (error) {
         console.error("Get user error:", error);
         res.status(500).json({
@@ -489,6 +524,17 @@ const updateProfile = async (req, res) => {
             data: updatedUser
         });
 
+        // Log profile update activity
+        await createActivityLog({
+            userId,
+            type: 'update',
+            action: 'Profile Updated',
+            description: 'Modified personal information',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
+
         // Trigger in-app notification
         notifyAccountUpdate(userId, 'profile').catch(e => console.error(`Profile update notification failed: ${e.message}`));
 
@@ -517,10 +563,31 @@ const uploadProfileImage = async (req, res) => {
 
         const userId = req.user.userId;
 
-        // Upload file (processes local file info)
-        const uploadResult = await uploadFile(req.file);
+        // Get Cloudinary instance from config
+        const { v2: cloudinary } = require('cloudinary');
+        cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET
+        });
 
-        // Update user profile image
+        // Upload to Cloudinary from buffer
+        const uploadResult = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+                {
+                    folder: 'payflow-pro/profile-images',
+                    resource_type: 'auto',
+                    public_id: `user-${userId}-${Date.now()}`
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                }
+            );
+            stream.end(req.file.buffer);
+        });
+
+        // Update user with Cloudinary image URL
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             {
@@ -534,6 +601,13 @@ const uploadProfileImage = async (req, res) => {
             { new: true }
         ).select('profileImage name email');
 
+        if (!updatedUser) {
+            return res.status(404).json({
+                success: false,
+                error: "User not found"
+            });
+        }
+
         res.status(200).json({
             success: true,
             message: "Profile image uploaded successfully",
@@ -542,11 +616,22 @@ const uploadProfileImage = async (req, res) => {
             }
         });
 
+        // Log profile image upload
+        await createActivityLog({
+            userId,
+            type: 'update',
+            action: 'Profile Image Updated',
+            description: 'Updated account profile picture',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
+
     } catch (error) {
         console.error("Upload profile image error:", error);
         res.status(500).json({
             success: false,
-            error: "Failed to upload profile image"
+            error: error.message || "Failed to update profile image"
         });
     }
 };
@@ -566,8 +651,16 @@ const deleteProfileImage = async (req, res) => {
             });
         }
 
-        // Delete from local storage using service
-        await deleteFile(user.profileImage.publicId);
+        // Get Cloudinary instance from config
+        const { v2: cloudinary } = require('cloudinary');
+        cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET
+        });
+
+        // Delete from Cloudinary
+        await cloudinary.uploader.destroy(user.profileImage.publicId);
 
         // Update user
         user.profileImage = undefined;
@@ -646,6 +739,17 @@ const changePassword = async (req, res) => {
         res.status(200).json({
             success: true,
             message: "Password changed successfully"
+        });
+
+        // Log password change
+        await createActivityLog({
+            userId,
+            type: 'security',
+            action: 'Password Changed',
+            description: 'Updated account security password',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
         });
 
         // Trigger in-app notification
@@ -780,6 +884,17 @@ const resetPassword = async (req, res) => {
         // Trigger in-app notification
         notifyPasswordResetSuccess(user._id).catch(e => console.error(`Reset success notification failed: ${e.message}`));
 
+        // Log password reset activity
+        await createActivityLog({
+            userId: user._id,
+            type: 'security',
+            action: 'Password Reset Successful',
+            description: 'Reset password via account security',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
+
         res.status(200).json({
             success: true,
             message: "Password reset successful. You can now login with your new password."
@@ -848,6 +963,17 @@ const verifyEmail = async (req, res) => {
 
         // Trigger in-app notification
         notifyEmailVerified(user._id).catch(e => console.error(`Email verification notification failed: ${e.message}`));
+
+        // Log email verification
+        await createActivityLog({
+            userId: user._id,
+            type: 'security',
+            action: 'Email Verified',
+            description: 'Verified email address for account security',
+            ip: req.ip,
+            device: req.headers['user-agent'],
+            status: 'success'
+        });
 
         res.status(200).json({
             success: true,
@@ -1428,6 +1554,45 @@ const getUserStatistics = async (req, res) => {
     }
 };
 
+/**
+ * Get activity logs for current user
+ */
+const getActivityLogs = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const { limit = 20, page = 1 } = req.query;
+
+        const logs = await ActivityLog.find({ userId })
+            .sort({ timestamp: -1 })
+            .limit(parseInt(limit))
+            .skip((parseInt(page) - 1) * parseInt(limit));
+
+        res.status(200).json(logs);
+
+    } catch (error) {
+        console.error("Get activity logs error:", error);
+        res.status(500).json({
+            success: false,
+            error: "Failed to fetch activity logs"
+        });
+    }
+};
+
+/**
+ * Helper to create an activity log
+ */
+const createActivityLog = async (data) => {
+    try {
+        await ActivityLog.create({
+            ...data,
+            timestamp: new Date()
+        });
+    } catch (error) {
+        console.error("Error creating activity log:", error);
+        // Don't throw, we don't want to break the main flow if logging fails
+    }
+};
+
 // ==================== EXPORT ====================
 
 module.exports = {
@@ -1441,6 +1606,7 @@ module.exports = {
     updateProfile,
     uploadProfileImage,
     deleteProfileImage,
+    getActivityLogs,
 
     // Password Management
     changePassword,

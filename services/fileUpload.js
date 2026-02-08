@@ -1,75 +1,52 @@
-const fs = require('fs');
-const path = require('path');
+const { v2: cloudinary } = require('cloudinary');
 
 /**
- * Handle local file upload (formatting response)
- * Since Multer limits are already applied and file is saved to disk,
- * this service primarily formats the response for the controller.
+ * Upload file to Cloudinary
+ * This service is currently unused as we upload directly in controllers
+ * Kept for potential future use or reference
  * 
- * @param {Object} file - File object from multer
- * @param {Object} options - Upload options (unused for local but kept for compatibility)
- * @returns {Promise<Object>} - Formatted upload result
+ * @param {Buffer} buffer - File buffer from multer
+ * @param {Object} options - Upload options (folder, resource_type, etc.)
+ * @returns {Promise<Object>} - Cloudinary upload result
  */
-const uploadFile = async (file, options = {}) => {
-    if (!file) {
-        throw new Error('No file provided');
+const uploadFile = async (buffer, options = {}) => {
+    if (!buffer) {
+        throw new Error('No file buffer provided');
     }
 
-    // specific relative path for the URL
-    // We assume the server serves the 'uploads' directory at the root or under /uploads
-    // multer stores absolute path in file.path
-
-    // We need to normalize the path to be a web URL
-    const relativePath = file.path.split('uploads')[1].replace(/\\/g, '/');
-    const url = `/uploads${relativePath}`;
-
-    return {
-        secure_url: url,
-        public_id: file.filename, // Using filename as the ID for local files
-        format: file.mimetype.split('/')[1],
-        width: 0, // Metadata extraction would require another library like sharp
-        height: 0,
-        resource_type: "image",
-        original_filename: file.originalname
-    };
+    return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+            {
+                folder: options.folder || 'payflow-pro',
+                resource_type: options.resource_type || 'auto',
+                public_id: options.public_id || undefined,
+                tags: options.tags || []
+            },
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+        stream.end(buffer);
+    });
 };
 
 /**
- * Delete file from local storage
- * @param {String} filename - Filename (publicId) to delete
+ * Delete file from Cloudinary
+ * @param {String} publicId - Cloudinary public ID
+ * @returns {Promise<Object>} - Cloudinary delete result
  */
-const deleteFile = async (filename) => {
-    if (!filename) return;
-
-    // We need to find the file. Since we don't store the full path in public_id (just filename),
-    // and files might be in subfolders (userId), valid deletion is tricky without full path.
-    // However, for this implementation, we will try to find it recursively or rely on the caller passing more info.
-
-    // BETTER APPROACH for local: The 'publicId' stored should probably be the relative path or we assume a structure.
-    // In the uploadFile above, public_id is just filename. 
-    // If multer storage puts it in 'uploads/userId/', we need to know that.
-
-    // For now, let's implement a safe delete that tries to find the file in the uploads dir.
-    // Or simpler: Just accept that for local dev, maybe deletion is skipped or we need to store full relative path as public_id.
-
-    // Let's update uploadFile to return relative path as public_id for easier deletion.
+const deleteFile = async (publicId) => {
+    if (!publicId) {
+        throw new Error('Public ID is required');
+    }
 
     try {
-        // This is a placeholder. Real local deletion requires knowing the exact path.
-        // If we store relative path as public_id, we can join with uploads dir.
-        // see modification in uploadFile helper above? 
-        // actually let's just leave it empty for safety unless we are sure of the path, 
-        // to avoid deleting wrong files. 
-        // If user wants strict local deletion, we should implement a proper path resolver.
-
-        // Assuming public_id IS the filename and we don't know the subdir easily without DB query:
-        // We will skip actual FS deletion for this iteration to prevent errors, 
-        // as local storage space is usually not the primary concern for this switch.
-        console.log(`[Local File Service] Request to delete file: ${filename}`);
-
+        const result = await cloudinary.uploader.destroy(publicId);
+        return result;
     } catch (error) {
-        console.error('File delete error:', error);
-        throw new Error('Failed to delete file from storage');
+        console.error('Cloudinary delete error:', error);
+        throw new Error('Failed to delete file from Cloudinary');
     }
 };
 
@@ -77,3 +54,4 @@ module.exports = {
     uploadFile,
     deleteFile
 };
+
