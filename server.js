@@ -137,82 +137,93 @@ app.get('/test-exact-config', async (req, res) => {
   const nodemailer = require('nodemailer');
 
   console.log('Current config:', {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    hasApiKey: !!process.env.SENDER_API_KEY,
     clientUrl: process.env.CLIENT_URL
   });
 
-  // Use EXACT same config as your working code
   const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: "smtp.sendgrid.net",
     port: 587,
     secure: false,
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    },
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false
+      user: "apikey",
+      pass: process.env.SENDER_API_KEY
     }
   });
 
   try {
+    // Verify SMTP connection
     await transporter.verify();
-    console.log('SMTP connection verified');
+    console.log('SendGrid SMTP connection verified');
 
     res.json({
       success: true,
-      message: 'SMTP configuration works',
+      message: 'SendGrid SMTP configuration works',
       config: {
-        host: "smtp.gmail.com",
+        host: "smtp.sendgrid.net",
         port: 587,
-        user: process.env.EMAIL_USER,
-        hasPassword: !!process.env.EMAIL_PASS,
-        clientUrl: process.env.CLIENT_URL
+        authUser: "apikey",
+        hasApiKey: !!process.env.SENDER_API_KEY,
+        clientUrl: process.env.CLIENT_URL,
+        provider: "SendGrid"
       }
     });
 
   } catch (error) {
-    console.error('SMTP Error:', {
+    console.error('SendGrid SMTP Error:', {
       message: error.message,
       code: error.code,
       response: error.response,
       responseCode: error.responseCode
     });
 
-    // Try without password spaces
-    try {
-      console.log('Trying without password spaces...');
-      const passwordNoSpaces = process.env.EMAIL_PASS.replace(/\s+/g, '');
+    let suggestion = "Check SENDGRID API key & sender verification";
 
-      const transporter2 = nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: passwordNoSpaces
-        }
-      });
-
-      await transporter2.verify();
-
-      res.json({
-        success: true,
-        message: 'Works without spaces in password',
-        suggestion: 'Remove spaces from EMAIL_PASS in Render'
-      });
-
-    } catch (error2) {
-      res.status(500).json({
-        success: false,
-        error: error.message,
-        code: error.code,
-        response: error.response,
-        suggestion: 'Gmail is blocking Render. Use SendGrid or Mailgun instead.'
-      });
+    if (error.code === "EAUTH") {
+      suggestion = "Invalid API key or wrong SMTP user (must be 'apikey')";
+    } else if (error.code === "ECONNECTION" || error.code === "ETIMEDOUT") {
+      suggestion = "Network issue or port blocked (rare on Render)";
     }
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      code: error.code,
+      suggestion,
+      provider: "SendGrid"
+    });
+  }
+});
+
+app.get('/test-sendgrid-lib', async (req, res) => {
+  const sgMail = require('@sendgrid/mail');
+  if (process.env.SENDER_API_KEY) {
+    sgMail.setApiKey(process.env.SENDER_API_KEY);
+  } else {
+    return res.status(500).json({ success: false, error: "SENDER_API_KEY not found in env" });
+  }
+
+  const msg = {
+    to: process.env.EMAIL_USER, // Send to self for testing
+    from: process.env.EMAIL_USER,
+    subject: 'SendGrid Library Test',
+    text: 'If you receive this, the SendGrid V3 library integration works!',
+    html: '<strong>If you receive this, the SendGrid V3 library integration works!</strong>',
+  };
+
+  try {
+    await sgMail.send(msg);
+    res.json({ success: true, message: "Email sent successfully via @sendgrid/mail" });
+  } catch (error) {
+    console.error('SendGrid Lib Error:', error);
+    if (error.response) {
+      console.error(error.response.body);
+    }
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: error.response ? error.response.body : null
+    });
   }
 });
 
