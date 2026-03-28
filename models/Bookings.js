@@ -25,6 +25,17 @@ const bookingSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    // 🏢 Seller Reference
+    hostId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        index: true
+    },
+    // 📦 Ecommerce Bridge
+    ecommerceOrderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Order"
+    },
     transactionId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Transaction",
@@ -38,12 +49,12 @@ const bookingSchema = new mongoose.Schema({
     // Payment details
     razorpayOrderId: {
         type: String,
-        required: true,
+        required: false, // Optional for non-razorpay payments
         index: true
     },
     razorpayPaymentId: {
         type: String,
-        required: true,
+        required: false,
         index: true
     },
 
@@ -84,8 +95,8 @@ const bookingSchema = new mongoose.Schema({
     // Status tracking
     status: {
         type: String,
-        enum: ["draft", "confirmed", "pending_payment", "paid", "processing", "completed", "cancelled", "refunded", "failed"],
-        default: "draft"
+        enum: ["pending", "paid", "confirmed", "processing", "shipped", "out_for_delivery", "delivered", "completed", "cancelled", "refunded", "failed"],
+        default: "pending"
     },
     paymentStatus: {
         type: String,
@@ -96,32 +107,42 @@ const bookingSchema = new mongoose.Schema({
     // Booking details
     bookingType: {
         type: String,
-        required: true
-    },
-    bookingDate: {
-        type: Date,
         required: true,
-        default: Date.now
+        default: "product"
     },
-    startDate: Date,
-    endDate: Date,
+
+    // 🚚 Logistics (Physical Goods)
+    shippingDetails: {
+        method: String,
+        trackingNumber: String,
+        carrier: String,
+        estimatedDeliveryDate: Date
+    },
+
+    // 🗓️ Services (Appointments/Rentals)
+    appointmentDetails: {
+        startTime: Date,
+        endTime: Date,
+        location: String,
+        virtualLink: String
+    },
 
     // Items/services booked
     items: [{
         itemId: {
-            type: mongoose.Schema.Types.ObjectId,
-            required: false
+            type: mongoose.Schema.Types.ObjectId
         },
+        skuId: String, // SKU Reference
         itemType: {
             type: String,
-            enum: ["room", "ticket", "service", "product", "membership", "general", "other"],
-            required: false,
-            default: "general"
+            enum: ["room", "ticket", "service", "product", "membership", "digital", "other"],
+            default: "product"
         },
         name: {
             type: String,
             required: true
         },
+        variantInfo: String, // e.g. "Space Gray / 512GB"
         description: String,
         quantity: {
             type: Number,
@@ -142,11 +163,9 @@ const bookingSchema = new mongoose.Schema({
             get: v => (v / 100).toFixed(2),
             set: v => Math.round(v * 100)
         },
-        taxRate: {
-            type: Number,
-            default: 0,
-            min: 0,
-            max: 100
+        sellerId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
         }
     }],
 

@@ -22,11 +22,9 @@ const authenticate = async (req, res, next) => {
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Check if user still exists and is active
-        const user = await User.findOne({
-            _id: decoded.userId,
-            isDeleted: false
-        }).select("-password -twoFactorSecret -twoFactorBackupCodes");
+        // Check if user still exists (Compatible with multiple user schemas across services)
+        const user = await User.findById(decoded.userId || decoded.id)
+            .select("-password -twoFactorSecret -twoFactorBackupCodes");
 
         if (!user) {
             return res.status(401).json({
@@ -35,28 +33,12 @@ const authenticate = async (req, res, next) => {
             });
         }
 
-        // Check if account is active
-        if (user.status !== "active") {
-            return res.status(403).json({
-                success: false,
-                error: `Account is ${user.status}. Please contact support.`
-            });
-        }
-
-        // Check if password was changed after token was issued
-        if (user.changedPasswordAfter(decoded.iat)) {
-            return res.status(401).json({
-                success: false,
-                error: "Password was recently changed. Please login again."
-            });
-        }
-
         // Attach user to request
         req.user = {
             userId: user._id,
             email: user.email,
             role: user.role,
-            status: user.status
+            status: user.status || 'active'
         };
 
         next();

@@ -60,7 +60,7 @@ const transactionSchema = new mongoose.Schema({
     },
     paymentType: {
         type: String,
-        enum: ["card", "netbanking", "wallet", "upi", "cash", "bank_transfer", "emi", "prepaid_card", "general", "service", "product", "subscription", "booking", "donation"],
+        enum: ["card", "netbanking", "wallet", "upi", "cash", "bank_transfer", "emi", "prepaid_card", "general", "service", "product", "subscription", "booking", "donation", "ecommerce_purchase"],
         required: true
     },
 
